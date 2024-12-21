@@ -1,0 +1,14 @@
+[package]
+name = "truthcoin-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ndarray ="0.15"
+rand = "0.8.5"
+approx = "0.5.1"
+chrono = "0.4"
+sha2 = "0.10"
+hex = "0.4"
+num-traits = "0.2.19"
+nalgebra = "0.33.2"
