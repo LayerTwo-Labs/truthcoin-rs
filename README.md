@@ -18,7 +18,7 @@ A Rust implementation of the Truthcoin protocol, providing a decentralized oracl
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/truthcoin-rs.git
+git clone git@github.com:LayerTwo-Labs/truthcoin-rs.git
 cd truthcoin-rs
 cargo build --release
 ```
