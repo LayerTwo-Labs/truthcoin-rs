@@ -1,7 +1,14 @@
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(dead_code)]
-#![allow(unused_imports)]
+//! Truthcoin-rs: A Rust implementation of the Truthcoin protocol
+//! 
+//! This implementation provides a decentralized oracle and prediction market system
+//! using custom mathematics and cryptographic primitives.
+
+#![warn(missing_docs)]
+#![warn(rustdoc::missing_crate_level_docs)]
+
+use anyhow::Result;
+use env_logger;
+use log::{info, debug};
 
 mod chain_objects;
 mod crypto;
@@ -11,44 +18,52 @@ use custom_math::nice_matrix::{LabeledMatrix, BinaryLabeledMatrix};
 use custom_math::get_weight;
 use custom_math::outcome_consensus::*;
 
-fn main() {
-    let m1 = generate_sample_matrix(1);
-    // println!("{:#}", m1);
-
-    // let rep = democracy_rep(&m1);
-    // println!("{:#}", rep);
-
-    let scl = all_binary(&m1);
-    println!("{:#}", scl);
-
-    // let outcomes = get_decision_outcomes(&m1, &rep, &scl, &Some(true));
-    // println!("{:#}", outcomes);
-
-    // let r = m1.row_labels.len();
-    // let c = m1.col_labels.len();
-    // println!("{:?}", r);
-    // println!("{:?}", c);
-
-    // let large_outcome = get_reward_weights(&m1, None, &scl, 0.10, 0.20, true);
-    // println!("{:#?}", large_outcome);
-
-    // println!("{:?}", fast_rep(&[4.0, 5.0, 6.0, 7.0, 8.0]));
-
-    // let large_outcome = get_reward_weights(&m1, Some(&fast_rep(&[4.0, 4.0, 4.0, 1.0, 1.0, 1.0])), &scl, 0.10, 0.20, true);
+/// Main entry point for the Truthcoin protocol implementation
+fn main() -> Result<()> {
+    // Initialize logging with timestamp
+    env_logger::Builder::from_default_env()
+        .format_timestamp_secs()
+        .init();
     
-    // let large_outcome = get_reward_weights(&m1,
-    //                         Some(&fast_rep(&[4.0, 3.0, 4.0, 1.0, 1.0, 1.0])),
-    //                         &scl, 0.10, 0.20, true);
+    info!("Starting Truthcoin protocol...");
+    
+    // Generate sample matrix for testing
+    debug!("Generating sample matrix");
+    let test_matrix = generate_sample_matrix(1);
+    
+    // Calculate binary scaling
+    debug!("Computing binary scaling");
+    let scaling = all_binary(&test_matrix);
+    println!("Binary Scaling Result:\n{:#}", scaling);
+    
+    // Example of reputation-weighted consensus
+    let reputation_weights = fast_rep(&[4.0, 3.0, 4.0, 1.0, 1.0, 1.0]);
+    debug!("Using reputation weights: {:?}", reputation_weights);
+    
+    // Run consensus factory with parameters
+    let factory_result = factory(
+        &test_matrix,
+        &scaling,
+        Some(&reputation_weights),
+        None,  // Default alpha
+        None,  // Default beta
+        Some(true),  // Include participation
+        None,  // Default smoothing
+    );
+    
+    info!("Consensus computation complete");
+    debug!("Factory results: {:#?}", factory_result);
+    
+    Ok(())
+}
 
-    // println!("{:?}", large_outcome);
-
-    let factory1 = factory(&m1, &scl, Some(&fast_rep(&[4.0, 3.0, 4.0, 1.0, 1.0, 1.0])), None, None, Some(true), None);
-
-    // println!("{:#?}", factory1.agents);
-    // println!("{:#?}", factory1.decisions);
-    // println!("{:#?}", factory1.original);
-    // println!("{:#?}", factory1.participation);
-    // println!("{:#?}", factory1.certainty);
-
-
+/// Generates documentation for the project
+/// 
+/// This can be run with:
+/// ```bash
+/// cargo doc --no-deps --open
+/// ```
+#[cfg(doc)]
+pub mod documentation {
+    #![doc = include_str!("../README.md")]
 }

@@ -1,0 +1,1726 @@
+---
+title: "Tests, Results, and Commentary"
+output: html_document
+---
+
+`r date()`
+Paul Sztorc
+Written in R (v 3.1.1) using Rstudio (v 0.98.1028)
+
+```{r Load, echo=FALSE, message=FALSE}
+#Cleanup
+rm(list=ls())
+
+#Load everything
+tryCatch(expr=setwd("~/GitHub/Truthcoin/lib/consensus/"), error=function(e) setwd(choose.dir(caption="Failed to set working directory automatically. Choose 'Truthcoin/lib/consensus' folder:")) )
+source(file="ConsensusMechanism.r")
+```
+
+
+```{r Tools, echo=FALSE, message=FALSE}
+
+# Basic Matrix for use
+M1 <- rbind(
+    c(1,1,0,0),
+    c(1,0,0,0),
+    c(1,1,0,0),
+    c(1,1,1,0),
+    c(0,0,1,1),
+    c(0,0,1,1))
+
+  
+row.names(M1) <- c("Honest", "Confused 1", "Honest", "Confused 2", "Liar", "Liar")
+colnames(M1) <- c("D1.1","D2.1","D3.0","D4.0")
+
+
+
+#1 - Who benefited this round?
+CompareIncentives <- function(X, FF=Factory, N=1, Scales=BinaryScales(X), ThisRep=DemocracyRep(X)) {
+  Dim <- dim(X)
+  Results <- data.frame('Group'=row.names(X))
+  Results <- suppressWarnings( cbind(Results, Chain(X,N=N,Scales,ThisRep)[[N]]$Agents[,c("OldRep","SmoothRep")] ) )
+  Results$Drep <- Results$SmoothRep - Results$OldRep
+  
+  Groups <- aggregate( . ~ Group, Results, sum)
+  Groups <- Groups[order(Groups$Drep,decreasing=TRUE),]
+  
+  Out <- vector("list",2)
+  Out[[1]] <- Results
+  Out[[2]] <- Groups
+  return(Out)
+}
+
+
+Chain <- function(X, N=2, Scales = BinaryScales(X), ThisRep = DemocracyRep(X)) {
+  # Repeats factory process N times
+
+  Output <- vector("list")
+  for(i in 1:N) {
+    Output[[i]] <- Factory(X,Scales,Rep=ThisRep)
+    ThisRep <- Output[[i]]$Agents[,"RowBonus"]
+  }
+  
+  return(Output)
+}
+
+# I declare this function, for easier/ automatic loading of packages...helps when working across different machines.
+Use <- function(package) {
+  if(suppressWarnings(!require(package,character.only=TRUE))) install.packages(package,repos="http://cran.case.edu/")
+  require(package,character.only=TRUE)
+}
+
+source(file="PlotJ.r")
+```
+
+
+```{r DeclareScenarios,echo=FALSE,message=FALSE}
+
+#Declare Big List of "Scenarios to Check"
+Scenarios <- vector("list")
+SLabels <- vector("list")
+
+#[1] Design Case
+SLabels$Base <- "Basic Case - 14/24 [58%] Honest"
+Scenarios$Base <- M1
+
+M1disp <- M1
+row.names(M1disp) <- paste("Voter",1:nrow(M1))
+#
+
+
+# [2] Reversed Matrix
+SLabels$Reversed <- "Basic Case - 14/24 [58%] Honest, reversed wording"
+M2 <- ReverseMatrix(M1)
+Scenarios$Reversed <- M2
+#
+
+
+# [3] Deviance: Deranged Nonconformist
+SLabels$Deviance <- "Punishment from Deviating from Stable"
+
+M3 <- rbind(M1[c(1,3),],
+            M1[c(1,3),],
+            "Liar"=c(0,0,1,1))
+
+Scenarios$Deviance <- M3
+#
+
+
+# [4] Coalitional Deviance: Using a group to game the system.
+SLabels$CoalitionalDeviance <- "Targeting Contract (#3) with <50% Conspirators (including 1 AntiTruth Diver)"
+SLabels$CoalitionalDeviance2 <- "Targeting Contract (#3) with <50% Conspirators (including 1 AntiTeam Diver)"
+
+ M4b <- rbind("True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "Diver"=c(0,0,1,1), #Diver
+              "Liar"= c(1,1,1,0),
+              "Liar"= c(1,1,1,0),
+              "Liar"= c(1,1,1,0), #4 conspirators           
+              "Liar"= c(1,1,1,0)) # + 1 Diver     = 5 <6    
+
+M4c <- M4b
+M4c["Diver",3] <- 0 #Diver negatively correlated with his team
+
+M4d <- rbind(M4c,"FailSafe"=c(.5,.5,.5,.5))
+
+
+Scenarios$CoalitionalDeviance  <- M4b
+Scenarios$CoalitionalDeviance2  <- M4c
+#
+
+
+# [5] Clueless: Passing on a Contract - "I have no idea"
+SLabels$CluelessControl <- c("Having no idea - 'passing' on a contract [control]")  
+SLabels$CluelessTest <- c("Having no idea - 'passing' on a contract [test]")  
+
+M3a <- rbind(M1[1,],M1[1,],M1[1,],M1[1,],M1[1,],M1[1,],M1[1,]) #bigger reference case
+row.names(M3a) <- rep("True",nrow(M3a))
+
+M3m <- M3a
+M3m[2,2] <- NA 
+
+Scenarios$CluelessControl <- M3a 
+Scenarios$CluelessTest <- M3m 
+#
+
+ 
+# [6] Inchoerence
+SLabels$Incoherence <- c("Punishing Incoherence - I KNOW that this contract is spam/nonsense") 
+SLabels$Incoherence2 <- c("Punishing Incoherence - I KNOW that this contract is spam/nonsense [2]") 
+
+M6 <- M3a
+M6[-3,2]  <- .5 #Incoherent
+
+colnames(M6) <- c("D1.1", "D2.(.5)", "D3.0", "D4.0")
+row.names(M6)[3] <- "Overconfident"
+M6disp <- M6
+row.names(M6disp) <- paste("Voter",1:nrow(M6))
+
+
+M6b <- M6
+M6b[7,2]  <- 0 #Incentive examination
+
+
+Scenarios$Incoherence <- M6
+Scenarios$Incoherence2 <- M6b
+#
+  
+
+
+
+
+# [7] Unanimous: Perfect Consensus Bug
+SLabels$Unanimous <- c("Having everyone agree perfectly (desireable) crashes PCA") 
+
+PerCon <- rbind(M1[1,], M1[1,], M1[1,], M1[1,])
+
+Scenarios$PerCon <- PerCon
+#
+
+
+# [8] Contract Gaming
+SLabels$Gaming <- c("Gaming the Contracts") 
+
+M9 <- cbind(M1,"C0.5"=.5,"C0.5"=.5,"C0.5"=.5,"C0.5"=.5,"C0.5"=.5,"C0.5"=.5,"C0.5"=.5,"C0.5"=.5)
+M9[5:6,5:12] <- c(0,1,1,0)
+M9 <- rbind(M9,M9,M9,M9)
+
+Scenarios$Gaming <- M9
+#
+
+
+# [9] Handling Missing Values
+SLabels$Missing1 <- c("A minority of players give missing values to 1 contract")
+SLabels$Missing2 <- c("A majority of players give missing values to a minority of their contracts")
+SLabels$Missing3 <- c("All players give missing values to a minority of their contracts")
+SLabels$Missing4 <- c("Some players give missing values to a majority of their contracts")
+SLabels$Missing5 <- c("All players give missing values to a majority of their contracts")
+
+M10a <- cbind(M1,"D5.0"=c(0,NA,0,NA,1,1))
+
+M10b <- cbind(M10a, "D6.1"=c(1,1,1,NA,0,0), "D6.0"=c(NA,NA,NA,0,1,1))
+M10b <- rbind(M10b,M10b)
+
+M10c <- M10b
+M10c[5,1] <- NA ; M10c[6,2] <- NA ; M10c[11,1] <- NA ; M10c[12,2] <- NA ;
+
+M10d <- M10b[-11:-12,]
+M10d[5,3:6] <- NA ; M10d[6,1:4] <- NA ; 
+M10d[7:8,1:2] <- NA ; M10d[2,2:3] <- NA;
+
+M10e <- rbind(M1,M1)
+M10e <- cbind(M10e[,1],M10e,M10e)
+
+M10e[1,1:5] <- NA
+M10e[2,2:6] <- NA
+M10e[3,3:7] <- NA
+M10e[4,4:8] <- NA
+M10e[5,5:9] <- NA
+M10e[6,c(6:9,1)] <- NA
+M10e[7,c(7:9,1:2)] <- NA
+M10e[8,c(8:9,1:3)] <- NA
+M10e[9,c(9,1:4)] <- NA
+M10e[10,1:5] <- NA
+M10e[11,2:6] <- NA
+M10e[12,3:7] <- NA
+
+Scenarios$Missing1 <- M10a
+Scenarios$Missing2 <- M10b
+Scenarios$Missing3 <- M10c
+Scenarios$Missing4 <- M10d
+Scenarios$Missing5 <- M10e
+#
+
+
+# [10] Riven Judgements
+SLabels$Riven <- "Separate but equal subgroups, and their recombination. [1]" 
+SLabels$Riven2 <- "Separate but equal subgroups, and their recombination. [2]" 
+
+Mg <- rbind( cbind(M1,   M1*NA, M1*NA),
+             cbind(M1*NA,M1,    M1*NA),
+             cbind(M1*NA,M1*NA, M1))
+
+Mg2 <- Mg
+Mg2[7,1] <- 1
+
+
+Scenarios$Riven <- Mg
+Scenarios$Riven2 <- Mg2
+#
+```
+
+
+Base
+---------------
+
+```{r Base}
+Factory(Scenarios$Base)
+CompareIncentives(Scenarios$Base)
+# Good.
+Chain(X = Scenarios$Base)
+PlotJ(M = Scenarios$Base)
+```
+
+Very good. Conforms quickly to a correct prediction.
+I'm thinking one block per day, or something, assuming we smooth difficulty correctly.
+
+Reversed
+---------------
+
+```{r Reversed}
+Factory(Scenarios$Reversed)
+all.equal(Factory(Scenarios$Reversed)$Agents,Factory(Scenarios$Base)$Agents) #TRUE
+```
+Identical incentive structure, despite reversed inputs and outputs.
+Good.
+
+One Liar
+------------------
+```{r OneLiar}
+Factory(Scenarios$Deviance)
+```
+Biggest Deviator gets CRUSHED to zero. High-Stakes!
+Good.
+
+Many Liars
+-------------------
+
+```{r ManyLiars}
+
+Factory(Scenarios$CoalitionalDeviance)
+#Success: An attempted <51% attack which failed.
+
+Factory(Scenarios$CoalitionalDeviance2)
+# Oh, no: A Sucessful <51% attack 'Friendly Fire' ...will have to address this. [Fixed, in fact it now does something really interesting]
+
+  #Pre-Analytics
+  CompareIncentives(X=Scenarios$CoalitionalDeviance2)
+  
+  row.names( Scenarios$CoalitionalDeviance2 )[7] <- "Liar"
+  CompareIncentives(X=Scenarios$CoalitionalDeviance2)
+
+  # [1] Success: 'Symmetric Friendly Fire'  (ie Team truth forms a coalition of their own)
+  Scenarios$CoalitionalDeviance3 <- Scenarios$CoalitionalDeviance2
+  Scenarios$CoalitionalDeviance3[6,] <- c(0,0,1,1)
+
+  CompareIncentives(X=Scenarios$CoalitionalDeviance3)
+```
+  #Chain(Scenarios$CoalitionalDeviance3,N=100)
+  #Team 'True' wins via symmetry-exploitation
+```{r ManyLiars2}
+  # [2] Success: 'Cold Feet 1' (a single player abandons the coalition)
+  Scenarios$CoalitionalDeviance4 <- Scenarios$CoalitionalDeviance2
+  Scenarios$CoalitionalDeviance4[8,] <- c(1,1,0,0)
+  
+  CompareIncentives(X=Scenarios$CoalitionalDeviance4)
+  Ss <- Chain(Scenarios$CoalitionalDeviance4,N=70)[[70]]$Agents
+  Ss <- data.frame(NewRep=as.numeric(Ss[,"RowBonus"]),Group=row.names(Ss))
+  aggregate(.~Group,data=Ss, FUN=sum)
+
+  Scenarios$CoalitionalDeviance5 <- Scenarios$CoalitionalDeviance2
+  Scenarios$CoalitionalDeviance5[8,] <- c(1,1,0,0)
+  Scenarios$CoalitionalDeviance5[9,] <- c(1,1,0,0)
+
+  CompareIncentives(X=Scenarios$CoalitionalDeviance5)
+  Ss <- Chain(Scenarios$CoalitionalDeviance5,N=50)[[50]]$Agents
+  Ss <- data.frame(NewRep=as.numeric(Ss[,"RowBonus"]),Group=row.names(Ss))
+  aggregate(.~Group,data=Ss, FUN=sum)
+  #Notice after 50 rounds, the devil [=King of Liars] has actually become the two bottommost liars, as they represent the most significant source of confusion.
+  #Team 'True' wins via stoicism
+
+  #[3] Recursive Friendly Fire - a sub-coalition forms to defect, but a sub-coalition of this coalition forms to defect again.
+  Scenarios$CoalitionalDeviance6 <- rbind(c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1), #10
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1),
+                                          c(1,1,0,0,1), #15 (60%)
+                                          
+                                          #Coalition 1, backstabbing Truth to game contract 3
+                                          c(0,0,0,1,0), #1 - Friendly Fire
+                                          c(1,1,1,0,1),
+                                          c(1,1,1,0,1),
+                                          c(1,1,1,0,1),
+                                          c(1,1,1,0,1),
+                                          c(1,1,1,0,1), #6 (24%)
+                                          
+                                          #Coalition 2, 'backstabbing' Coalition 1 to game contract 4
+                                          c(0,0,1,0,0), #1 - Friendly Fire
+                                          c(1,1,0,1,1),
+                                          c(1,1,0,1,1),
+                                          c(1,1,0,1,1)) #4 (16%)
+
+  row.names(Scenarios$CoalitionalDeviance6) <- c(rep('Truth',15),rep('Lie 1',6),rep('Lie 2',4))
+  colnames(Scenarios$CoalitionalDeviance6) <- c("C1.1","C2.1","C3.0","C4.0","C5.1")
+  Factory(Scenarios$CoalitionalDeviance6)
+  CompareIncentives(Scenarios$CoalitionalDeviance6)
+  #fantastic sucess...Lie 2 loses less
+
+  #clearly, the Nash Equilibrium
+  Scenarios$CoalitionalDeviance7 <- Scenarios$CoalitionalDeviance6[1:21,]
+  Scenarios$CoalitionalDeviance7 <- rbind(Scenarios$CoalitionalDeviance7, rbind(
+                                                                              'Truth 2'=c(1,1,0,0,1),
+                                                                              'Truth 2'=c(1,1,0,0,1),
+                                                                              'Truth 2'=c(1,1,0,0,1),
+                                                                              'Truth 2'=c(1,1,0,0,1)))
+  Factory(Scenarios$CoalitionalDeviance7)
+  CompareIncentives(Scenarios$CoalitionalDeviance7)
+
+  # [4] Passive - Sideways expansion by 2 contracts
+  Scenarios$CoalitionalDeviance8 <- cbind(Scenarios$CoalitionalDeviance2,Scenarios$CoalitionalDeviance2[,1:2])
+  Factory(Scenarios$CoalitionalDeviance8)
+  CompareIncentives(Scenarios$CoalitionalDeviance8)   
+  #Success, larger number of contracts makes this attack improbable.
+
+  Scenarios$CoalitionalDeviance9 <- cbind(Scenarios$CoalitionalDeviance2,
+                                          Scenarios$CoalitionalDeviance2,
+                                          Scenarios$CoalitionalDeviance2,
+                                          Scenarios$CoalitionalDeviance2[,-3])
+  Factory(Scenarios$CoalitionalDeviance9)
+  CompareIncentives(Scenarios$CoalitionalDeviance9)
+  #The attack must expand proportionally.
+  
+  Scenarios$CoalitionalDeviance10 <- cbind(Scenarios$CoalitionalDeviance2,
+                                           Scenarios$CoalitionalDeviance2,
+                                           Scenarios$CoalitionalDeviance2,
+                                           Scenarios$CoalitionalDeviance2)
+  Factory(Scenarios$CoalitionalDeviance10)
+  CompareIncentives(Scenarios$CoalitionalDeviance10)
+  #The attack must expand proportionally.
+  
+  
+```
+
+
+Uninformed People
+------------------
+
+```{r Uninformed}
+Factory(Scenarios$CluelessControl)
+Factory(Scenarios$CluelessTest)
+```
+Finding: 2 falls from tie at 5th .11 to a tie at 7th with .07; no impact on other results: success.
+
+[done] Note: Must be a discrete set of options: c(1,0,NA,.5)    ---- !!! by extention, Catch must be implemented in FillNA. Indeed, in this example our lazy character is punished twice.
+otherwise there will likely be pragmatic individuals who rationally deviate to answers like ~.85 or ~.92 or some nonsense. [obviously]
+
+Overwhelming Incoherence
+--------------------------
+```{r Incoherence}
+
+Factory(Scenarios$Incoherence)
+Factory(Scenarios$Incoherence2)
+```
+Interesting behavior, but incentive compatible, particularly given low Schelling Salience
+Incentive to switch to the consensus .5
+
+Perfect Consensus
+--------------------
+```{r PefectConsensus}
+Factory(Scenarios$PerCon)
+#No problems.
+```
+
+Gaming
+----------------
+```{r Gaming}
+
+Factory(Scenarios$Gaming)
+CompareIncentives(Scenarios$Gaming)
+#more or less what i expected
+```
+
+
+Missing Values
+-----------------
+
+```{r MissingValues}
+
+Factory(Scenarios$Missing1)
+Factory(Scenarios$Missing2)
+Factory(Scenarios$Missing3)
+
+PlotJ(M=Scenarios$Missing3)
+
+Factory(Scenarios$Missing4)
+Factory(Scenarios$Missing5)
+# Liars are still punished, even though outcomes quickly collapse toward (.5).
+
+
+Factory(Scenarios$Riven)
+Factory(Scenarios$Riven2)
+
+```
+
+Scaled Claims
+----------------------------
+```{r ScaledClaims}
+
+
+#HoR party seats example
+
+#add a new row
+MS <- cbind(M1,  rbind(233,
+                       199,
+                       233,
+                       250,
+                       435,
+                       435))
+colnames(MS) <- c( colnames(MS)[-5], "C5.233")
+
+#build non-default scales
+Scales <- matrix( c( rep(FALSE,ncol(MS)),
+                     rep(0,ncol(MS)),
+                     rep(1,ncol(MS))), 3, byrow=TRUE, dimnames=list(c("Scaled","Min","Max"),colnames(MS)) )
+Scales["Scaled",5] <- 1
+Scales["Max",5] <- 435
+
+
+
+#DJIA example
+
+MS2 <- cbind(MS,  rbind(16027.59,
+                       NA,
+                       16027.59,
+                       NA,
+                       8001,
+                       19999))
+
+Scales2 <- cbind(Scales,rbind(1,8000,20000))
+
+colnames(MS2) <- c( colnames(MS2)[-6], "C6.1602759")
+colnames(Scales2) <- colnames(MS2)
+
+
+#Edit catch to choose most-likely values (modal)
+
+Factory(MS2,Scales2)
+```
+
+
+```{r Other}
+
+# !!! Must FillNa with .5 FIRST, then average in, to prevent monopoly voting on brand-new contracts. (Actually, if it will eventually be ruled .5).
+
+#Voting Across Time
+#Later Votes should count more
+#! ...simple change = ConoutFinal becomes exponentially smoothed result of previous chains.
+#! require X number of chains (blocks) before the outcome is officially determined (two weeks?)
+
+# Will need:
+# 1] Percent Voted
+# 2] Time Dimension of blocks.
+
+#
+# Possible solutions:
+#   1 - sequential filling of NAs (sequential removal of columns) - pre-processing replace with average?
+#   2 - what about the 'expert factor' idea? what happened to that?
+#   3 - Completely replace FillNa with Reputations (lots of positives here)
+
+#TO-DO
+#Cascading reputation .6,.5,.3.,2., etc =   dexp(nrow(Mg))
+
+#Mysterious behavior - loading only on first factor
+#solutions
+# 1- ignore. incentives will encourage filling out of contracts on 'obvious' events
+# 2 - use later factors. Unknown what behavior could result from this
+```
+
+
+Additive Reputation
+-------------------------------------
+Is reputation completely additive? - Yes, now.
+
+```{r AdditiveR}
+Mar1 <- M1
+r1 <- rep(1/6,6)
+
+Mar2 <- M1[-6,]
+r2 <- c(1/6, 1/6, 1/6, 1/6, 2/6)
+
+Mar3 <- M1[c(1,2,4,5),]
+r3 <- c( 2/6, 1/6, 1/6, 2/6)
+
+Mar4 <- M1[c(1,2,4,5,6),]
+r4 <- c( 2/6, 1/6, 1/6, 1/6, 1/6)
+
+Factory(Mar1,Rep=r1)$Agents
+Factory(Mar2,Rep=r2)$Agents
+Factory(Mar3,Rep=r3)$Agents
+Factory(Mar4,Rep=r4)$Agents
+
+#Is reputation additive? Yes (excluding NA-born effects, we could correct with Rep/mean(Rep) but NA is not part of equilibrium so it shouldnt matter).
+```
+
+
+```{r Unknown}
+Factory(Mg)$Agents[,c("OldRep","ThisRep","SmoothRep")]
+Factory(Mg2)$Agents[,c("OldRep","ThisRep","SmoothRep")]
+# True 1 of group 2 skyrockets ahead, as desired.
+
+# upon reflection, I dont think this 'problem' is particularly bad.
+```
+
+```{r Unknown2}
+Mub1 <- matrix(c(1, 0, 1.0, 1,  0.4498141, 0, 0, 1, 1, 0.7488008,
+                 0, 0, 0.5, NA, 0.4460967, 0, 0, 1, 0, 0.7488008,
+                 1, 0, 1.0, 1,  0.4498141, 0, 0, 1, 1, NA), 3, byrow = TRUE)
+
+Sc <- BinaryScales(Mub1)
+Sc["Scaled",c(5,10)] <- 1
+
+Factory(Mub1, Scales = Sc, Verbose = TRUE)
+
+
+
+```
+
+
+Scalability
+------------------
+What are the computational limits?
+Largely irrelevant because of branching, this is important for setting parameters correctly (and in general).
+
+```{r Scalability,cache=FALSE}
+
+TestLimit <- function(n1,n2,AddNa=1) {
+  M_huge <- matrix(round(runif(n1*n2)),n1,n2)
+  if(AddNa==1) M_huge[sample(1:(n1*n2),size=(n1*n2)/3)] <- NA
+  Factory(M_huge)
+}
+
+
+system.time(print("1"))
+system.time(TestLimit(100,10))
+system.time(TestLimit(1000,100))
+# user  system elapsed 
+# 0.66    0.00    0.65
+
+#system.time(TestLimit(10000,100))
+#    user  system elapsed 
+#    10.23    0.05   10.29
+
+
+
+#system.time(TestLimit(100000,100))
+#    user  system elapsed 
+#  134.08    0.80  134.96 
+
+#Solutions
+
+# [1] - cap the number of rows
+  # in its current state, it is basically unlimited - unrealistic
+  # the first 100,000 votes are probably decentralized enough ...how low should this number go? (can be a f[ncol(Vmatrix)])
+  # given that reputation is fully additive, this would discourage the spreading of reputations
+  # this would also solve the "dust bust" question (ie suck up any accounts with tiny dust amounts of reputation)
+  # can add the slow retarget to make this grow over the next thousand years (every 4 years?)
+
+#after simply listing the specifics of this solution I realize it is the best candidate
+
+#Actually all of this is irrelevant because code runs 100x faster on python
+```
+
+```{r RewardFunction}
+
+RawVsReturn <- 0
+
+TwoTeams <- matrix( rbind( c(0,0,1,1,0,0,1,1),
+                           c(1,1,0,0,1,1,0,0)),nrow=2)
+
+OtherEffect <- function(Own) {
+  Other <- 1 - Own
+  Results <- Factory(TwoTeams, Rep = c(Own,Other))
+  End <-  Results$Agents[1,"RowBonus"]
+  Gain <- (End - Own)
+  if(RawVsReturn == 0) Gain <- Gain/Own
+  return(Gain)
+}
+
+RF <- data.frame("PctAgree"=seq(.05, .95, by = .05))
+
+RF$p100 <- vapply(RF$PctAgree,FUN =  OtherEffect, FUN.VALUE = 2)
+
+YLab <- "Your Reward (Raw)"
+if(RawVsReturn == 0) YLab <- "Your Reward (%)"
+
+plot(p100~PctAgree, data=RF, xlab = "Agreement with Your Choices (%)", ylab= YLab, main="Reward Function")
+axis(side = 1, at = seq(.1,9,by = .2))
+abline(h=0, lty=2)
+
+lines(p100~PctAgree, data=RF)
+
+
+
+TwoTeams <- matrix( rbind( c(NA,0,1,1,0,0,1,1),
+                           c(1,1,0,0,1,1,0,0)),nrow=2)
+
+RF$p088 <- vapply(RF$PctAgree, FUN =  OtherEffect, FUN.VALUE = 2)
+lines(p088~PctAgree, data=RF, col=2, lty=3)
+
+TwoTeams <- matrix( rbind( c(NA,0,1,1,NA,0,NA,1),
+                           c(1,1,0,0,1,1,0,0)),nrow=2)
+
+RF$p063 <- vapply(RF$PctAgree, FUN =  OtherEffect, FUN.VALUE = 2)
+lines(p063~PctAgree, data=RF, col=3, lty=4)
+
+TwoTeams <- matrix( rbind( c(NA,0,NA,1,NA,0,NA,NA),
+                           c(1,1,0,0,1,1,0,0)),nrow=2)
+
+RF$p038 <- vapply(RF$PctAgree, FUN =  OtherEffect, FUN.VALUE = 2)
+lines(p038~PctAgree, data=RF, col=4, lty=5)
+
+LegPos <- c(.05,.045)
+if(RawVsReturn == 0) LegPos <- c(.45,-.04)
+
+
+# Zoom plot before plotting legend
+  
+legend(LegPos[1],LegPos[2], legend = c("0% Blank", "12.5% Blank", "37.5% Blank", "62.5% Blank"), lty = c(1,3,4,5), col = 1:4,cex=0.6 )
+# 
+library(reshape2)
+library(ggplot2)
+
+mDF <- melt(RF,id.vars = "PctAgree")
+mDF
+
+mDF$variable <- factor(mDF$variable,
+                       levels = c("p100", "p088", "p063", "p038"),
+                       labels = c("0% Blank", "12.5% Blank", "37.5% Blank", "62.5% Blank"))
+
+
+
+pRF <- ggplot(mDF,aes(x = I(100*PctAgree), y = value, color = variable, shape=variable, linetype = variable)) +
+  geom_point() +
+  geom_line() +
+  ylim(-.2, .2) +
+  theme_bw(base_size = 10) +
+  labs(x = "Agreeing with You (% of Total)", y = "Your Gain/Loss of Reputation") +
+  #theme(legend.position = "bottom") +
+  guides(color=guide_legend(title = NULL),
+         linetype=guide_legend(title = NULL),
+         shape=guide_legend(title = NULL))
+
+pRF
+ggsave(pRF,filename = "figures/reward.jpg",width = 4, height = 2.5, units = "in")
+
+```
+
+
+```{r RefInd MonteCarlo}
+
+set.seed(12321) # for reproduceability
+
+Iter <- 10000
+
+Results <- data.frame("N"=1:Iter, "N1"=1:Iter, "N2"=1:Iter, "FI"=1:Iter)
+Failures <- vector("list",length = 1)
+
+for(i in 1:Iter) {
+  
+  # Generate random dimension Lengths
+  N1 <- floor( runif(1, 20, 50) )
+  N2 <- floor( runif(1, 8, 25) )
+  
+  # Generate random data
+  Mat <- matrix(data = runif(n = N1*N2), N1, N2)
+  
+  # Make left half Binary
+  bN2  <- floor( N2/2 )
+  Mat[,1:bN2] <- apply( Mat[,1:bN2], 1:2, FUN = function(x) Catch(x, .20) )
+  Mat
+  
+  # Set Scale Index
+  Scales <- BinaryScales(Mat)
+  Scales["Scaled",-1:-bN2] <- 1
+  
+  # Did RefInd Catch?
+  Actual <- Factory(Mat, Scales = Scales)$Decisions[ "DecisionOutcome.Final", ]
+  Expected <- apply(Mat, 2, median)
+  FailureIndex <- ( sum(Actual - Expected)^2 ) / N2
+  # Failure Index represents the proportion of time that the Decsion returned was actually the median.
+  
+  # Store Results
+  Results[i,] <- c(i, N1, N2, FailureIndex)
+  
+  if(FailureIndex > .25) Failures[[i]] <- Mat
+  
+}
+
+# new indicator variables "fail" and "superfail"
+Results$Fail <- ( Results$FI > .25 )
+Results[ Results$Fail == "TRUE", ]
+
+Results$SuperFail <- ( Results$FI > .50 )
+Results[ Results$SuperFail == "TRUE", ]
+
+apply(Results, 2, mean) # Failed(.50) in 2 of 10,000 cases. this one really SHOULD be zero, though... (??)
+
+# Who did the worst?
+Results[ Results$FI == max(Results$FI), ]
+
+# was 3974, 1153, now 1864 (below)
+
+# #  In-Depth examination
+# Test <- Failures[[3974]] # severe outlier...RefInd failure not only above 25%, but above 50%
+# Scales <- BinaryScales(Test)
+# bN2  <- floor( ncol(Scales)/2 )
+# Scales["Scaled",-1:-bN2] <- 1
+# Factory( Test, Scales = Scales, Verbose = TRUE)
+# 
+# rbind()
+# apply(Test, 2, mean)
+
+# # new case
+# Test <- Failures[[1153]]
+# Scales <- BinaryScales(Test)
+# bN2  <- floor( ncol(Scales)/2 )
+# Scales["Scaled",-1:-bN2] <- 1
+# Factory( Test, Scales = Scales, Verbose = TRUE)
+# apply(Test, 2, mean)
+# # > [1] 0.5967742 0.3870968 0.5806452 0.5645161 0.5806452 0.5483871 0.5645161 0.5262935 0.4781809 0.4609896 0.4791602 0.5030739 0.5237114 0.4562253 0.5546559
+# # results are simply very, very ambiguous on right, leading to (what appears to be) problems with Catch (but which is actually the expected behavior)
+
+
+# # New(er) Case
+# Test <- Failures[[1864]]
+# Scales <- BinaryScales(Test)
+# bN2  <- floor( ncol(Scales)/2 )
+# Scales["Scaled",-1:-bN2] <- 1
+# Factory( Test, Scales = Scales, Verbose = TRUE)
+# apply(Test, 2, mean)
+# 
+# rbind( Factory( Test, Scales = Scales)$Decisions["DecisionOutcome.Final",] ,
+#        apply(Test, 2, mean) )
+
+# reflects the discontinuity at catch, and the difference between mean and median, nothing more
+
+```
+
+
+Multivariate Plurality
+-------------------------------
+
+```{r MultivariatePlurality}
+
+N   <- 8
+vec <- c(0, 1)
+lst <- lapply(numeric(N), function(x) vec)
+EM <- as.matrix(expand.grid(lst)) # an "Exhaustive Matrix" with one Vote for every single possibility
+
+apply(EM, 2, FUN = mean) # mean of each column: all dead center at .5
+hist( apply(EM, 1, FUN = mean), breaks = 50 ) # mean of each row...completely even.
+
+## Sanity Test ## ( for setup / fun only )
+
+# this should be weird 
+Factory(EM)
+# ..and indeed it was, stood on a knife and then tipped randomly over.
+
+# ...lets examine more:
+sink(file = "figures/temp.txt") # dumps output to a text file...less scrolling.
+Factory(EM, Verbose = TRUE)
+sink()
+
+# [1] ""
+# [1] " %% Reference Index %% : 0"
+# [1] "Estimations using: Previous Rep, Option 1, Option 2"
+#      [,1] [,2] [,3]
+# [1,]  0.5  1.0  0.0
+# [2,]  0.5  0.5  0.5
+# [3,]  0.5  0.5  0.5
+# [4,]  0.5  0.5  0.5
+# [5,]  0.5  0.5  0.5
+# [6,]  0.5  0.5  0.5
+# [7,]  0.5  0.5  0.5
+# [8,]  0.5  0.5  0.5
+# [1] ""
+
+# as expected, the algorithm had no idea what to make of this.
+
+
+# ...on to our main purpose...
+
+# Real <- sample(1:nrow(EM), 1)
+Real <- 5 # reproduceability
+
+#Nudge Reputations UP
+Nudge <- function(Margin, Real=5, X = EM, Verbose = TRUE, ReportUnit = FALSE) {
+   # reset
+  TestRep <- DemocracyRep(X)
+  
+  # bump one guy into the lead, rescale
+  TestRep[Real] <- Margin
+  TestRep <- TestRep/sum(TestRep)
+  
+  if(Verbose) print(TestRep[Real]) # What did we actually end up with?
+  
+  if(ReportUnit) return( TestRep[Real] ) # if we only want to see the effect of the rescaling
+  
+  return(TestRep)
+}
+  
+TestStrikeThrough <- function(Margin=.05, Verbose=TRUE) {
+ 
+  TestRep <- Nudge(Margin, Real, EM, Verbose)
+  
+  Ours <- TestRep[Real]
+  
+  Expected <- EM[Real,] # our champions
+  Actual <- Factory(EM, Rep = TestRep)$Decisions["DecisionOutcome.Final",]
+  
+  return(  list( "Ours"=Ours, "Data"=rbind(Expected,Actual) )  )
+  
+}
+
+OptimizeStrikethrough <- function(Iter=70) {
+  # saves some time by calc'ing how low we can go
+  
+  Start <- .02
+  for(i in 1:Iter) {
+    Start <- Start + .005
+    ThisTrial <- TestStrikeThrough(Start, Verbose = FALSE)
+    SuccessFlag <- all.equal( ThisTrial$Data["Expected",], ThisTrial$Data["Actual",] )
+    
+    if( SuccessFlag==TRUE ) return(Start) # return the value we need 
+  }
+  
+  print("Failure.")
+  return(Start)
+  
+}
+
+UnitTest_Strike <- OptimizeStrikethrough()
+UnitTest_Strike
+
+# It is related to the CatchP, but better. 0.1875876
+
+TestStrikeThrough(.05) # Not yet...
+TestStrikeThrough(.10) # Cool, right? [edit: not yet...]
+TestStrikeThrough(.255) # [edit: Cool, right?] 0.2038217 required.
+
+
+# Whitepaper Screenshots
+TestRep <- Nudge(.255) # to land on a round number ( 0.087 ) [edit: no longer valid]
+
+# Display
+cbind(TestRep, EM)
+Factory(EM, Rep = TestRep)
+
+
+
+
+# Let's try to really push the limits of SVD, by feeding it totally garbage scaled data.
+set.seed(12343) # reproduceability
+
+# literal random voting
+EM[1:(256*8)]  <- runif(n = 256*8)
+EM_Scales <- BinaryScales(EM)
+EM_Scales["Scaled",] <- 1
+# who's our champeon?
+Goal <- EM[5,]
+# > Goal
+#       Var1       Var2       Var3       Var4       Var5       Var6       Var7       Var8 
+# 0.87622391 0.84224256 0.99578814 0.59265832 0.20945478 0.09379725 0.23320352 0.37501704 
+
+TestScaledStrikethrough <- function(Iter=100) {
+  
+  StartRep <- .05
+  
+  Results <- vector("list",1)
+  
+  for(i in 1:Iter) {
+    
+    # Increment
+    StartRep <- StartRep + .05
+    # Test
+    ThisTrial <- Factory( EM, Scales = EM_Scales, Rep = Nudge(StartRep, Verbose = FALSE) )$Decisions["DecisionOutcome.Final",]
+    
+    # Measure Results
+    AE <- abs(ThisTrial - Goal)
+    MAE <- mean(AE)
+    SuccessFlag <- MAE==0
+    
+    # Record Results
+    Results[[i]] <- MAE
+
+    if(SuccessFlag==TRUE) {
+      
+      # Format Data for Reporting
+      Rows <- length(Results)
+      Prompts <- seq(from = .10, by = .05, length.out = Rows)
+      Reps <- vapply(Prompts, FUN = Nudge, Verbose=FALSE, ReportUnit=TRUE, FUN.VALUE = 1)
+      
+      # Assemble Data
+      FinalResults <- melt(Results)
+      FinalResults$Reps <- Reps
+      names(FinalResults) <- c("TotalError","N","LoyalRep")
+      
+      return(FinalResults)
+      }
+  }
+  
+  print("Failure.")
+  return(Results)
+}
+
+
+Q <- TestScaledStrikethrough()
+
+library(scales)
+
+StrikePlot <- ggplot(Q, aes(y=TotalError, x=LoyalRep) ) +
+                geom_point() +
+                geom_line() +
+                scale_y_continuous() +
+                scale_x_continuous(labels=percent) +
+                labs(x = "reputation voting for Ballot X (%)", y = "Outcome Error, abs(Ballot - Calculated), mean across 8 Decisions" )
+
+StrikePlot 
+
+# Could theoretically range from 8 (all 100% wrong) to 0 (all 0% wrong).
+# Probabalistically, a random process would produce errors of (1/3) for one variable [and roughly 2.667 for a sum of 8 variables].
+# This handily out-competes that.
+
+### MetaTest
+
+MetaScaledTest <- function(Iter2=500) {
+  
+  MetaResults <- vector("list",Iter2)
+  
+  for(j in 1:Iter2) {
+    
+    # New Data
+    EM[1:(256*8)]  <<- runif(n = 256*8)
+    Goal <<- EM[5,]
+    
+    # Get Results and Collate
+    TempQ <- TestScaledStrikethrough()
+    MetaResults[[j]] <- TempQ 
+    
+    }
+  return(MetaResults)  
+}
+
+BigResults <- MetaScaledTest()
+# Takes about 10 seconds
+
+mBR <- melt(BigResults, id.vars = "N")
+fBR <- dcast(mBR, formula = ... ~ variable)
+
+
+
+MetaStrikePlot <- ggplot(fBR, aes(y=TotalError, x=LoyalRep, group=L1) ) +
+                geom_point(alpha=1/10) +
+                geom_line(alpha=1/10) +
+                scale_y_continuous(labels=percent) +
+                scale_x_continuous(labels=percent) +
+                labs(x = "Reputation Voting for Ballot X (%)", y = "Absolute Outcome Difference, mean (n=8)", title="500 Random Vote Matricies")
+
+
+ffBR <- dcast(mBR, formula = N  ~ variable, fun.aggregate = median)
+ffBR$L1 <- 999
+
+# ffBR <- fBR
+# ffBR$L1 <- 999 # merge them all into a big group for smooth
+
+# MetaStrikePlot + geom_smooth(data=ffBR, method = "lm")
+
+p2 <- MetaStrikePlot +
+        geom_line(data=ffBR, aes(color="red"), size=1.5) +
+        geom_point(data=ffBR, aes(color="red"), size=2) +
+        scale_color_discrete(guide=FALSE) +
+        scale_size_continuous(guide=FALSE) +
+        theme_bw()
+
+ggsave( filename = "figures/scaled-converg.jpg", plot = p2, units = "in", height = 4, width = 6 )
+
+
+```
+
+Audit
+------------------
+What is the effect of withholding "confusing" Decisions?
+
+```{r HoldOff,cache=FALSE}
+
+library(reshape2)
+
+DoubleFactoryTest <- function(X, Scales = BinaryScales(X), Rep = DemocracyRep(X), CatchP=.1, MaxRow=5000, Phi=.65, Verbose=FALSE) {
+  
+  WaveOne <- Factory(M0 = X, Scales = Scales, Rep = Rep, CatchP = CatchP, MaxRow = MaxRow, Verbose = Verbose)
+  
+  print(" Wave One Complete.")
+  
+  
+  # Find the contested contracts
+  ContestParameter <- .65 # completely made up, for now
+  
+  Safe  <- ( WaveOne$Decisions["Certainty",] ) >= Phi # all those contracts which were unanimous for a subset of proportion ("Phi")
+  
+  print( sum(Safe)/ncol(X) ) # proportion which made it
+  print( X[,Safe] )          # the new matrix
+  
+  WaveTwo <- Factory( X[,Safe] ,
+                      Scales[,Safe],
+                      Rep,CatchP,MaxRow,Verbose )
+  
+  Results <- matrix( c( WaveOne$Agents[,"RowBonus"], WaveTwo$Agents[,"RowBonus"] ),ncol=2,dimnames=list(rownames(X),c("One","Two")) )
+  
+  mRes <- melt(Results)
+  cRes <- dcast(mRes,formula=Var1~Var2,fun.aggregate=sum)
+  
+  print(cRes)
+  
+  Results <- cbind(Results, "Diff"=Results[,2]-Results[,1])
+  
+  return(Results)
+  
+}
+
+X <- Scenarios$Base
+
+DoubleFactoryTest(Scenarios$Base)
+
+#          X1       One   Two
+# 1 Distort 1 0.1717624 0.175
+# 2 Distort 2 0.1717624 0.175
+# 3      Liar 0.3000000 0.300
+# 4      True 0.3564751 0.350
+
+DoubleFactoryTest(Scenarios$CoalitionalDeviance)
+
+#      X1        One        Two
+# 1 Diver 0.08181818 0.08181818
+# 2  Liar 0.35698136 0.36727273
+# 3  True 0.56120046 0.55090909
+
+# The attack has essentially been erased...
+
+
+DoubleFactoryTest(Scenarios$CluelessTest)
+# No difference
+
+DoubleFactoryTest(Scenarios$Incoherence,CatchP=.2)
+
+DoubleFactoryTest(Scenarios$Gaming,CatchP=.2)
+
+
+Mz <- matrix( c(1, 1,.5, 0, 0, # real
+                0, 1,.5, 0, 0, # attacker 1
+                1, 0,.5, 0, 0), # attacker 2
+              ncol=5,byrow=TRUE,dimnames=list(c("Honest","Attacker1","Attacker2"),c("C1.1","C2.1","C3.5","C4.0","C5.0")))
+                
+                
+DoubleFactoryTest(Mz,Rep=c(.34,.30,.36))
+DoubleFactoryTest(Mz,Rep=c(.34,.36,.30))
+
+# Having more reputation actually HURTs the attack, by kicking it out of the second wave. Then, with the contested Decision out of the wave, a less-interested attacker bailing with Honest on one other Decision (one that they don't really care about). The majority attacker loses some of the influence he would have gained had he been able to flip more contracts.
+# Knowing this, the minority attacker should be even more worried than usual.
+# Facinating.
+
+```
+
+Double Factory Examination
+===========================================
+
+Here I go into even greater detail...in even more depth than the above.
+```{r DefineDoubleFact}
+
+Use('ggplot2')
+
+## What effect does DoubleFactory have?
+
+Dim <- 20
+
+# "Continuously Ambiguous"
+ContAmb <- matrix(0,(Dim-1),(Dim-1))
+ContAmb[ lower.tri(ContAmb, diag = TRUE) ]  <- 1
+
+# Balance the matrix
+ContAmb <- cbind(ContAmb,0) 
+
+# Add a few 'right answers'
+ContAmb <- rbind(ContAmb[1:9,],
+                 ContAmb[9,], ContAmb[9,],
+                 ContAmb[10,], ContAmb[10,],
+                 ContAmb[10:19,] ) 
+
+colnames( ContAmb ) <- paste("D.",1:(ncol(ContAmb)), sep="") 
+row.names( ContAmb ) <- paste("Voter.",1:(nrow(ContAmb)), sep="") 
+
+ContAmb
+
+
+DoubleFactoryTest <- function(X, Scales = BinaryScales(X), Rep = DemocracyRep(X), CatchP=.1, MaxRow=5000, Phi=.65, Verbose=FALSE, PrintSurvivors = TRUE, Title = "d Reputation across SingleWave and DoubleWave (Audit) SVD") {
+  # Runs Factory Twice and checks on what happened as a result
+  
+  WaveOne <- Factory(X, Scales, Rep, CatchP, MaxRow, Verbose)
+  
+  if(Verbose) print(" Wave One Complete.")
+  
+  
+  # Find the contested contracts
+  Safe  <- ( WaveOne$Decisions["Certainty",] >= Phi )# all those contracts which were unanimous for a subset of proportion ("Phi")
+  
+  # What if they ALL were contested?
+  if( sum(Safe)==0 ) {
+    print("Consensus Failure!! ..printing Wave one")
+    print("Consensus Failure!! ..printing Wave one")
+    print("Consensus Failure!! ..printing Wave one")
+    return(WaveOne)
+    }
+  
+  if(PrintSurvivors) {
+    print( sum(Safe)/ncol(X) ) # proportion which made it
+    print( X[,Safe] )          # the new matrix
+  }
+  
+  # Do SVD again on the Safe Subset
+  WaveTwo <- Factory( X[,Safe] ,
+                      Scales[,Safe],
+                      Rep,CatchP,MaxRow,Verbose)
+  
+  # Extract the results needed for our graph
+  Results <- matrix( c( ( WaveOne$Agents[,"RowBonus"] - WaveOne$Agents[,"OldRep"] ),
+                        ( WaveTwo$Agents[,"RowBonus"] - WaveTwo$Agents[,"OldRep"] ) ),
+                     ncol=2,
+                     dimnames=list(rownames(X),c("Gain.W1","Gain.W2")) )
+  
+  # Format Data for ggplot
+  mRes <- melt(Results)
+  cRes <- dcast(mRes,formula=Var1~Var2,fun.aggregate=sum)
+  
+  Results <- cbind(Results, "Diff"=Results[,2]-Results[,1])
+  
+  PlotResults <- data.frame( cbind(Results, "Voter"=factor( 1:(nrow(Results)) )) )
+  mPR <- melt(PlotResults,id.vars="Voter")
+  
+  # Add Gain as new variable, for consistent colors
+  GainFromTwoWave <- mPR[ mPR$variable=="Diff", -2]
+  names(GainFromTwoWave)[2] <- "GainFromTwoWave"
+  mPR2 <- merge(mPR, GainFromTwoWave)
+  
+  # Change units to % for easier reading
+  mPR2$value <- mPR2$value * 100
+  mPR2$GainFromTwoWave <- mPR2$GainFromTwoWave * 100
+  
+  # Build Plot
+  P1 <- ggplot(mPR2, aes(y=value, x=Voter, fill=GainFromTwoWave )) +
+    geom_bar(stat="identity", position = "dodge") +
+    scale_fill_continuous(low = "red") +                    
+    theme(legend.position="none") +
+    geom_text(aes( label = Voter, y=0, vjust = 1, size = (10 - .4*nrow(X)) ),
+              alpha=I(1),
+              show_guide = FALSE) +
+    facet_grid(variable~.) +
+    labs(title=Title, y = "Change in Reputation (%)") +
+    theme_bw() +
+    theme(text = element_text(size=8))
+  
+  print(Results)
+  
+  return(P1)
+  
+}
+
+```
+
+```{r Tests}
+
+DoubleFactoryTest(X = ContAmb)
+
+ggsave( filename = "figures/base.jpg", plot = DoubleFactoryTest(M1), units = "in", height = 4, width = 5 )
+ggsave( filename = "figures/purpose.jpg", plot = DoubleFactoryTest(ContAmb), units = "in", height = 5, width = 6 )
+
+# Comment: Here, because of this amusingly-unrealistic Voting Matrix (where nearly everyone is equally confused about everything),
+# ...the 'Reference Index' is at zero. The software cannot establish a reference case, and is essentially indifferent.
+# This is why Voters 1-8 benefit and 15-23. This is arbitrary and unstable, and might flip with just a fractional increase in 15-23 coordination.
+# Double Factory seems to help in this case: the middle groups become more coordinated and less arbitrary.
+
+ContAmb2 <- ContAmb
+ContAmb2["Voter.23", "D.18"] <- 0 # The most profitable deviation (?)
+
+DoubleFactoryTest(ContAmb2, PrintSurvivors = FALSE)
+# Voter 23 has sent his report skyrocketing...
+# 
+# DoubleFactoryTest(ContAmb, PrintSurvivors = FALSE)["Voter.23","Gain.W2"] # -0.004347826
+# DoubleFactoryTest(ContAmb2, PrintSurvivors = FALSE)["Voter.23","Gain.W2"] # 0.003491191
+# # ...but the core group is mostly unaffected (improving slightly).
+# DoubleFactoryTest(ContAmb, PrintSurvivors = FALSE)["Voter.10","Gain.W2"] # 0.0003981117
+# DoubleFactoryTest(ContAmb2, PrintSurvivors = FALSE)["Voter.10","Gain.W2"] # 0.0004388715
+
+
+# The obvious counter-move:
+ContAmb3 <- ContAmb2
+ContAmb3["Voter.1", "D.3"] <- 1 # The most profitable deviation (?)
+
+DoubleFactoryTest(ContAmb3)
+# Voter 1 has reclaimed his position...
+# DoubleFactoryTest(ContAmb2, PrintSurvivors = FALSE)["Voter.1","Gain.W2"] # -0.004347826  -- notice that this is actually the same as ContAmb1 Voter 23!
+# DoubleFactoryTest(ContAmb3, PrintSurvivors = FALSE)["Voter.1","Gain.W2"] # 0.003792857
+# # ...and the core group still marches slowly toward victory.
+# DoubleFactoryTest(ContAmb2, PrintSurvivors = FALSE)["Voter.10","Gain.W2"] # 0.0004388715
+# DoubleFactoryTest(ContAmb3, PrintSurvivors = FALSE)["Voter.10","Gain.W2"] # 0.0004328065
+
+# Repeat repeat repeat...
+ContAmb4 <- ContAmb3
+ContAmb4["Voter.22", "D.17"] <- 0
+ContAmb4["Voter.21", "D.16"] <- 0
+ContAmb4["Voter.20", "D.15"] <- 0
+# # Voter 22 ...
+# DoubleFactoryTest(ContAmb3, PrintSurvivors = FALSE)["Voter.22","Gain.W2"] # -0.004347826
+# DoubleFactoryTest(ContAmb4, PrintSurvivors = FALSE)["Voter.22","Gain.W2"] # 0.003074838
+# # ...march, march, march.
+# DoubleFactoryTest(ContAmb3, PrintSurvivors = FALSE)["Voter.10","Gain.W2"] # 0.0004328065
+# DoubleFactoryTest(ContAmb4, PrintSurvivors = FALSE)["Voter.10","Gain.W2"] # 0.0006672369
+
+
+```
+
+
+```{r PhiEffect}
+
+DoubleFactoryTest(ContAmb, Phi = .55)
+
+DoubleFactoryTest(ContAmb, Phi = .70)
+
+DoubleFactoryTest(ContAmb, Phi = .90)
+
+DoubleFactoryTest(ContAmb, Phi = .95)
+
+# The effect is clear: more stablity. W2 is simply "flatter" and less subject to the arbitrary tiebreaker of the Reference Index.
+
+```
+
+
+```{r BumpingInAndOut}
+
+Bump <- ContAmb
+
+Unbumped <- DoubleFactoryTest(Bump, Title = "Voter 8 Resolves D.8")
+
+# Voter 8 Bumps Decision 8 from the VoteMatrix into the Audit...by making things more confusing, Voter 8
+Bump2 <- Bump
+Bump2["Voter.8","D.8"] <- 0
+Bumped <- DoubleFactoryTest(Bump2, Title = "Voter 8 Forces Audit for D.8")
+
+# Unbumped["Voter.8","Gain.W2"]
+# Bumped["Voter.8","Gain.W2"]
+# This is kind of strange...
+
+# (1) There is a more profitable move availiable to Voter.8
+# (2) This is a function of this strange matrix specifically
+
+Bump3 <- Bump
+Bump3["Voter.8","D.9"] <- 1
+
+# Unbumped["Voter.8","Gain.W2"]
+DoubleFactoryTest(Bump3,Title="Voter 8 'unAudits' D.9")  #  ["Voter.8","Gain.W2"]
+# Ha, this is interesting...Voter 8 accidentally de-coordinated his misinformed group.
+
+Bump <- matrix(0,(Dim-1),(Dim-1))
+colnames( Bump ) <- paste("D.",1:(ncol(Bump)), sep="") 
+row.names( Bump ) <- paste("Voter.",1:(nrow(Bump)), sep="") 
+Bump[1:9,"D.1"] <- 1
+DoubleFactoryTest(Bump, Title="Perfect agreement on everything except D.1")
+ggsave( filename = "figures/audit-gamed.jpg", plot = DoubleFactoryTest(Bump, Title="Perfect agreement on everything except D.1"),
+        units = "in", height = 5, width = 6 )
+
+
+BumpD <- Bump
+BumpD[16:19,1] <- 1
+DoubleFactoryTest(BumpD, Title="Any 4 (of 10 dissenters) change their mind and 'unbump' D.1")
+ggsave( filename = "figures/audit-ungamed.jpg", plot = DoubleFactoryTest(BumpD, Title="Any 4 (of 10 dissenters) change their mind and 'unbump' D.1"),
+        units = "in", height = 5, width = 6 )
+# gotcha! ( the double-agent incentive )
+
+
+# Clearly, if someone "un-Bumps" Decision 1, the "Bumpers" are screwed.
+
+```
+
+
+
+
+```{r Synthesis}
+
+source(file="Audit.r")
+
+# Outcome of Phi / DoubleFactory
+M_res <- M1[,2:3]
+
+GetUniqueBallots( M_res )
+
+GetAuditChoices( M_res )
+
+GetContestedDecisions <- function(M) {
+  # Puts a few pieces together
+  
+  Uncontested <- colnames( DoubleFactory(M)$Filled )
+  ContestedMatrix <- M[,! (colnames(M) %in% Uncontested) ] # notice "!"
+  return( GetAuditChoices( ContestedMatrix ) )
+}
+
+GetContestedDecisions(M1)
+# $Choices
+#   BallotGroup BallotRep D2.1 D3.0
+# 1           A 0.3333333    1    0
+# 2           B 0.1666667    0    0
+# 4           D 0.3333333    0    1
+# 
+# $NonChoices
+#   BallotGroup BallotRep D2.1 D3.0
+# 3           C 0.1666667    1    1
+
+# Notice something interesting:
+GetAuditChoices( M1 )
+GetAuditChoices( M1[,2:3] )
+
+# Notice also that I am NOT using SVD on purpose:
+# [1] If we make it to this point, the attacker will have >50% ...
+# [2] SVD had a specific purpose of measuring disagreement with the majority. However, this case is a failure-to-find-majority.
+
+BigM1 <- cbind( M1, M1, M1, M1[,-3])
+
+DoubleFactoryTest(BigM1)
+GetContestedDecisions(BigM1)
+PlotJ(BigM1)
+
+
+
+#
+colnames(VM6) <- paste("D",1:5,sep = ".")
+Scales6 <- BinaryScales(VM6)
+Scales6["Scaled",] <- TRUE
+DoubleFactoryTest(VM6, Scales = Scales6, Rep = R6a)
+GetAuditChoices(VM6,Reputation = R6a)
+# This seems to be a successful attack ... but how strategically stable is it?
+
+# ...if the 68% group waivers a little:
+R6b <- c(.34, .32001, .33999)
+GetAuditChoices(VM6,Reputation = R6b)
+# $Choices
+#   BallotGroup BallotRep D.1 D.2 D.3  D.4   D.5
+# 1           A   0.34000 0.8   0   0 0.25 0.045
+# 3           C   0.33999 0.4   1   1 0.15 0.015
+# 
+# $NonChoices
+#   BallotGroup BallotRep D.1 D.2 D.3 D.4  D.5 SurrogateChoice
+# 2           B   0.32001 0.6 0.5 0.5 0.2 0.03               C
+
+# this results favors increasing the unique Ballots to 3, (perhaps, IF the current Ballots do not contain enough residual vote-distance)
+
+# let's go back and add that.
+
+
+# (later) ...added.
+
+```
+
+
+
+```{r Assurance}
+
+# Paying people to vote badly: why it doesn't work.
+# http://forum.truthcoin.info/index.php/topic,173.0.html
+
+
+# Splitting Your Vote
+Mvs <- rbind( M1[1,],
+              M1[1,],
+              M1[1,],
+              M1[1,],
+              M1[1,],
+              M1[2,],
+              M1[2,],
+              M1[2,],
+              M1[2,],
+              M1[2,] )
+
+row.names(Mvs) <- paste(rep(c("Honest","Attack"),each=5),rep(1:5,times=2), sep = "")
+       
+Mvs
+
+Vec <- c(40,25,15,15,05)
+Vec2 <- .02*Vec
+
+VecT <- c(Vec,Vec2) / sum( c(Vec,Vec2) )
+
+
+# Emphasize that they are fully coordinated
+row.names(Mvs) <- rep( paste("Player",1:5), 2)
+print( cbind("Rep"=round(VecT,3), Mvs))
+EvenSplits <- CompareIncentives(Mvs,ThisRep = VecT)
+print( EvenSplits )
+# Key Points:
+#   * Amounts lost ( look at "[[1]]" ) equal amounts gained.
+#   * Effect does not vary with Rep size.
+#   * Drep has zeros ( e-18 is vanishingly small )
+
+
+
+# Alternative Scenario: Large defector (the 40% guy chooses not to do it)
+# (keeping an epsilon to preserve the column-structure of the previous example, for readability)
+
+
+V2 <- VecT
+V2[1] <- .39999
+V2[6] <- .40 - .39999
+V2 # sum(V2) = 1
+
+UnevenSplits_Large <- CompareIncentives(Mvs,ThisRep = V2)
+
+EvenSplits[[2]]
+UnevenSplits_Large[[2]]
+
+
+# Alternative Scenario: Small Defector (the .05 guy)
+# (keeping an epsilon to preserve the column-structure of the previous example, for readability)
+
+
+V3 <- VecT
+V3[5] <- .04999
+V3[10] <- .05 - .04999
+V3 # sum(V3) = 1
+
+
+UnevenSplits_Small <- CompareIncentives(Mvs,ThisRep = V3)
+
+EvenSplits[[2]]
+UnevenSplits_Large[[2]]
+UnevenSplits_Small[[2]][c(5,4,3,2,1),] # Do not be fooled by the reversed order in _Small .
+
+Merge1 <- merge( x = EvenSplits[[2]][,-3], y = UnevenSplits_Large[[2]][,c(1,4)], by = "Group", all = TRUE)
+Merge2 <- merge( x = Merge1, y = UnevenSplits_Small[[2]][,c(1,4)], by = "Group", all = TRUE)  
+
+names(Merge2)[c(3,4,5)] <- c("Equal","LargeOut","SmallOut")
+
+
+# Consider each agent's return
+
+Returns <-  Merge2
+Returns$Equal <- Returns$Equal / Returns$OldRep
+Returns$LargeOut <- Returns$LargeOut / Returns$OldRep
+Returns$SmallOut <- Returns$SmallOut / Returns$OldRep
+mReturns <- melt(Returns, id.vars = c("Group","OldRep"))
+
+PlotSplit <- ggplot(mReturns, aes(y=value, x=OldRep, group=variable,
+                                        colour=variable,
+                                        linetype=variable,
+                                        shape=variable )) +
+          geom_point() +
+          geom_line()
+
+ggsave(filename = "figures/SplittingVotes.jpg", plot = PlotSplit, units = "in", width = 6, height = 3)
+
+```
+
+
+Tricky Cases
+-------------------------------
+
+```{r Trick0}
+
+Base <- M1
+
+#            D1.1 D2.1 D3.0 D4.0
+# Honest        1    1    0    0
+# Confused 1    1    0    0    0
+# Honest        1    1    0    0
+# Confused 2    1    1    1    0
+# Liar          0    0    1    1
+# Liar          0    0    1    1
+
+
+Factory(M1)
+
+# $Agents
+#               OldRep   ThisRep SmoothRep NArow ParticipationR RelativePart  RowBonus
+# Honest     0.1666667 0.2673086 0.1767309     0              1    0.1666667 0.1767309
+# Confused 1 0.1666667 0.2326914 0.1732691     0              1    0.1666667 0.1732691
+# Honest     0.1666667 0.2673086 0.1767309     0              1    0.1666667 0.1767309
+# Confused 2 0.1666667 0.2326914 0.1732691     0              1    0.1666667 0.1732691
+# Liar       0.1666667 0.0000000 0.1500000     0              1    0.1666667 0.1500000
+# Liar       0.1666667 0.0000000 0.1500000     0              1    0.1666667 0.1500000
+# 
+# $Decisions
+#                             D1.1       D2.1      D3.0      D4.0
+# First Loading         -0.5395366 -0.4570561 0.4570561 0.5395366
+# DecisionOutcomes.Raw   0.7000000  0.5267309 0.4732691 0.3000000
+# Consensus Reward       0.5000000  0.0000000 0.0000000 0.5000000
+# Certainty              0.7000000  0.0000000 0.0000000 0.7000000
+# NAs Filled             0.0000000  0.0000000 0.0000000 0.0000000
+# ParticipationC         1.0000000  1.0000000 1.0000000 1.0000000
+# Author Bonus           0.5000000  0.0000000 0.0000000 0.5000000
+# DecisionOutcome.Final  1.0000000  0.5000000 0.5000000 0.0000000
+
+```
+
+```{r Trick1}
+ M4b <- rbind("True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "True"= c(1,1,0,0),
+              "Diver"=c(0,0,1,1), #Diver
+              "Liar"= c(1,1,1,0),
+              "Liar"= c(1,1,1,0),
+              "Liar"= c(1,1,1,0), #4 conspirators           
+              "Liar"= c(1,1,1,0)) # + 1 Diver     = 5 <6   
+
+# > Factory( M4b )
+
+# $Agents
+#           OldRep    ThisRep  SmoothRep NArow ParticipationR RelativePart   RowBonus
+# True  0.09090909 0.11715228 0.09353341     0              1   0.09090909 0.09353341
+# True  0.09090909 0.11715228 0.09353341     0              1   0.09090909 0.09353341
+# True  0.09090909 0.11715228 0.09353341     0              1   0.09090909 0.09353341
+# True  0.09090909 0.11715228 0.09353341     0              1   0.09090909 0.09353341
+# True  0.09090909 0.11715228 0.09353341     0              1   0.09090909 0.09353341
+# True  0.09090909 0.11715228 0.09353341     0              1   0.09090909 0.09353341
+# Diver 0.09090909 0.00000000 0.08181818     0              1   0.09090909 0.08181818
+# Liar  0.09090909 0.07427157 0.08924534     0              1   0.09090909 0.08924534
+# Liar  0.09090909 0.07427157 0.08924534     0              1   0.09090909 0.08924534
+# Liar  0.09090909 0.07427157 0.08924534     0              1   0.09090909 0.08924534
+# Liar  0.09090909 0.07427157 0.08924534     0              1   0.09090909 0.08924534
+# 
+# $Decisions
+#                             [,1]       [,2]      [,3]       [,4]
+# First Loading         -0.4082483 -0.4082483 0.7071068 0.40824829
+# DecisionOutcomes.Raw   0.9181818  0.9181818 0.4387995 0.08181818
+# Consensus Reward       0.3333333  0.3333333 0.0000000 0.33333333
+# Certainty              0.9181818  0.9181818 0.0000000 0.91818182
+# NAs Filled             0.0000000  0.0000000 0.0000000 0.00000000
+# ParticipationC         1.0000000  1.0000000 1.0000000 1.00000000
+# Author Bonus           0.3333333  0.3333333 0.0000000 0.33333333
+# DecisionOutcome.Final  1.0000000  1.0000000 0.5000000 0.00000000
+
+
+              
+```
+
+```{r Trick2}
+
+Mz2 = matrix(c(
+  0.0 , 1.0 , 0.8,
+  0.5 , 0.0 , 0.8,
+  1.0 , 0.5 , 1.0,
+  0.0 , 1.0 , 0.0,
+  1.0 , 0.5 , 1.0,
+  0.0 , 1.0 , 1.0,
+  0.0 , 1.0 , 1.0),
+  ncol=3,byrow=TRUE
+)
+
+Scales <- BinaryScales(Mz2)
+Scales[1,3] <- 1
+
+Factory( Mz2, Scales =  Scales )
+
+# $Agents
+#         OldRep    ThisRep SmoothRep NArow ParticipationR RelativePart  RowBonus
+# [1,] 0.1428571 0.23744984 0.1523164     0              1    0.1428571 0.1523164
+# [2,] 0.1428571 0.03608275 0.1321797     0              1    0.1428571 0.1321797
+# [3,] 0.1428571 0.00000000 0.1285714     0              1    0.1428571 0.1285714
+# [4,] 0.1428571 0.26568561 0.1551400     0              1    0.1428571 0.1551400
+# [5,] 0.1428571 0.00000000 0.1285714     0              1    0.1428571 0.1285714
+# [6,] 0.1428571 0.23039090 0.1516105     0              1    0.1428571 0.1516105
+# [7,] 0.1428571 0.23039090 0.1516105     0              1    0.1428571 0.1516105
+# 
+# $Decisions
+#                             [,1]      [,2]       [,3]
+# First Loading         -0.7620507 0.5630656 -0.3197434
+# DecisionOutcomes.Raw   0.3232327 0.7392489  1.0000000
+# Consensus Reward       0.3443670 0.2869725  0.3686605
+# Certainty              0.6106774 0.6106774  0.5603639
+# NAs Filled             0.0000000 0.0000000  0.0000000
+# ParticipationC         1.0000000 1.0000000  1.0000000
+# Author Bonus           0.3443670 0.2869725  0.3686605
+# DecisionOutcome.Final  0.0000000 1.0000000  1.0000000
+
+
+```
+
+
+```{r Trick3}
+
+
+## Setup ##
+Dim <- 20
+Bump <- matrix(0,(Dim-1),(Dim-1))
+# Bump[ upper.tri(Bump, diag = TRUE) ]  <- 1
+
+colnames( Bump ) <- paste("D.",1:(ncol(Bump)), sep="") 
+row.names( Bump ) <- paste("Voter.",1:(nrow(Bump)), sep="") 
+Bump[1:9,"D.1"] <- 1
+
+BumpD <- Bump
+BumpD[16:19,1] <- 1
+
+##
+
+
+
+Factory(Bump)
+# $Agents
+#              OldRep ThisRep  SmoothRep NArow ParticipationR RelativePart   RowBonus
+# Voter.1  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.2  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.3  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.4  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.5  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.6  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.7  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.8  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.9  0.05263158     0.0 0.04736842     0              1   0.05263158 0.04736842
+# Voter.10 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.11 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.12 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.13 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.14 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.15 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.16 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.17 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.18 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+# Voter.19 0.05263158     0.1 0.05736842     0              1   0.05263158 0.05736842
+
+Factory(BumpD)
+# $Agents
+#              OldRep    ThisRep  SmoothRep NArow ParticipationR RelativePart   RowBonus
+# Voter.1  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.2  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.3  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.4  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.5  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.6  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.7  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.8  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.9  0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.10 0.05263158 0.00000000 0.04736842     0              1   0.05263158 0.04736842
+# Voter.11 0.05263158 0.00000000 0.04736842     0              1   0.05263158 0.04736842
+# Voter.12 0.05263158 0.00000000 0.04736842     0              1   0.05263158 0.04736842
+# Voter.13 0.05263158 0.00000000 0.04736842     0              1   0.05263158 0.04736842
+# Voter.14 0.05263158 0.00000000 0.04736842     0              1   0.05263158 0.04736842
+# Voter.15 0.05263158 0.00000000 0.04736842     0              1   0.05263158 0.04736842
+# Voter.16 0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.17 0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.18 0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+# Voter.19 0.05263158 0.07692308 0.05506073     0              1   0.05263158 0.05506073
+
+```
+
+

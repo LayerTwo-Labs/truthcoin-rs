@@ -2,13 +2,57 @@
 name = "truthcoin-rs"
 version = "0.1.0"
 edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A Rust implementation of Truthcoin protocol"
+repository = "https://github.com/yourusername/truthcoin-rs"
+license = "MIT"
+readme = "README.md"
+keywords = ["blockchain", "cryptocurrency", "consensus", "truthcoin"]
+categories = ["cryptography", "mathematics"]
 
 [dependencies]
-ndarray ="0.15"
-rand = "0.8.5"
+# Numerical computation
+ndarray = "0.15"
+nalgebra = "0.33.2"
+num-traits = "0.2.19"
 approx = "0.5.1"
-chrono = "0.4"
+
+# Cryptography
 sha2 = "0.10"
 hex = "0.4"
-num-traits = "0.2.19"
-nalgebra = "0.33.2"
+
+# Time handling
+chrono = "0.4"
+
+# Random number generation
+rand = "0.8.5"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# CLI support
+clap = { version = "4.4", features = ["derive"] }
+
+[dev-dependencies]
+criterion = "0.5"
+pretty_assertions = "1.4"
+test-case = "3.3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
